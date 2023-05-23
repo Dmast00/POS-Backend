@@ -1,4 +1,5 @@
-﻿using POS.Domain.Entities;
+﻿using Microsoft.EntityFrameworkCore;
+using POS.Domain.Entities;
 using POS.Infrastructure.Commons.Bases.Request;
 using POS.Infrastructure.Commons.Bases.Response;
 using POS.Infrastructure.Persistences.Contexts;
@@ -14,35 +15,88 @@ namespace POS.Infrastructure.Persistences.Repositories
         {
             _context = context;
         }
-
-        public Task<Category> CategoryById(int categoryId)
+        public async Task<BaseEntityResponse<Category>> ListCategories(BaseFiltersRequest filters)
         {
-            throw new NotImplementedException();
+            var response = new BaseEntityResponse<Category>();
+
+            var category = (from c in _context.Categories
+                            where c.AuditDeleteUser == null && c.AuditDeleteDate == null
+                            select c).AsNoTracking().AsQueryable();
+
+            if(filters.NumFilter is not null && !string.IsNullOrEmpty(filters.TextFilter))
+            {
+                switch(filters.NumFilter)
+                {
+                    case 1:
+                        category = category.Where(x => x.Name!.Contains(filters.TextFilter)); 
+                        break;
+
+                    case 2:
+                        category = category.Where(x => x.Description!.Contains(filters.TextFilter));
+                        break;
+                }
+            }
+            if(filters.StateFilter is not null)
+            {
+                category = category.Where(x => x.State.Equals(filters.StateFilter));
+            }
+            if(filters.StartDate is not null && !string.IsNullOrEmpty(filters.EndDate))
+            {
+                category = category.Where(x => x.AuditCreateDate >= Convert.ToDateTime(filters.StartDate) && x.AuditCreateDate <= Convert.ToDateTime(filters.EndDate).AddDays(1));
+            }
+            if (filters.Sort is null)
+            {
+                filters.Sort = "CategoryId";
+            }
+            
+            response.TotalRecords = await category.CountAsync();
+            response.Items = await Ordering(filters, category, !(bool)filters.Download).ToListAsync();
+            return response;
+        }
+        public async Task<IEnumerable<Category>> ListSelectCategories()
+        {
+            var categories = await _context.Categories.Where(c => c.State.Equals(1) && c.AuditDeleteUser == null && c.AuditDeleteDate == null).AsNoTracking().ToListAsync();
+
+            return categories;
+        }
+        public async Task<Category> CategoryById(int categoryId)
+        {
+            var category = await _context.Categories.AsNoTracking().FirstOrDefaultAsync(x => x.CategoryId.Equals(categoryId));
+            return category;
         }
 
-        public Task<bool> EditCategory(Category category)
+        public async Task<bool> RegisterCategory(Category category)
         {
-            throw new NotImplementedException();
+            category.AuditCreateUser = 1;
+            category.AuditCreateDate = DateTime.Now;
+
+            await _context.AddAsync(category);
+            var recordsffected = await _context.SaveChangesAsync();
+            return recordsffected > 0;
         }
 
-        public Task<BaseEntityResponse<Category>> ListCategories(BaseFiltersRequest filters)
+        public async Task<bool> EditCategory(Category category)
         {
-            throw new NotImplementedException();
-        }
+            category.AuditUpdateUser = 1;
+            category.AuditUpdateDate = DateTime.Now;
+            _context.Update(category);
+            _context.Entry(category).Property(x => x.AuditCreateUser).IsModified = false;
+            _context.Entry(category).Property(x => x.AuditCreateDate).IsModified = false;
 
-        public Task<IEnumerable<Category>> ListSelectCategories()
-        {
-            throw new NotImplementedException();
-        }
+            var recordsffected = await _context.SaveChangesAsync();
+            return recordsffected > 0;
 
-        public Task<bool> RegisterCategory(Category category)
-        {
-            throw new NotImplementedException();
         }
-
-        public Task<bool> RemoveCategory(int categoryId)
+        public async Task<bool> RemoveCategory(int categoryId)
         {
-            throw new NotImplementedException();
+            var category = await _context.Categories.AsNoTracking().SingleOrDefaultAsync(x => x.CategoryId.Equals(categoryId));
+            category!.AuditDeleteUser = 1;
+            category.AuditDeleteDate = DateTime.Now;
+
+            _context.Update(category);
+
+            var recordsffected = await _context.SaveChangesAsync();
+            return recordsffected > 0;
         }
     }
 }
